@@ -449,6 +449,10 @@ extension UTMRemoteClient {
             try await _restoreSnapshotVirtualMachine(parameters: .init(id: id, name: name))
         }
 
+        func listSnapshotsVirtualMachine(id: UUID) async throws -> [String] {
+            try await _listSnapshotsVirtualMachine(parameters: .init(id: id)).names
+        }
+
         func changePointerTypeVirtualMachine(id: UUID, toTabletMode tablet: Bool) async throws {
             try await _changePointerTypeVirtualMachine(parameters: .init(id: id, isTabletMode: tablet))
         }
@@ -544,6 +548,11 @@ extension UTMRemoteClient {
         @discardableResult
         private func _restoreSnapshotVirtualMachine(parameters: M.RestoreSnapshotVirtualMachine.Request) async throws -> M.RestoreSnapshotVirtualMachine.Reply {
             try await M.RestoreSnapshotVirtualMachine.send(parameters, to: peer)
+        }
+
+        @discardableResult
+        private func _listSnapshotsVirtualMachine(parameters: M.ListSnapshotsVirtualMachine.Request) async throws -> M.ListSnapshotsVirtualMachine.Reply {
+            try await M.ListSnapshotsVirtualMachine.send(parameters, to: peer)
         }
 
         @discardableResult

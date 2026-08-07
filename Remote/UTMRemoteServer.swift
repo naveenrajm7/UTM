@@ -677,6 +677,8 @@ extension UTMRemoteServer {
                 return try await _deleteSnapshotVirtualMachine(parameters: .decode(data)).encode()
             case .restoreSnapshotVirtualMachine:
                 return try await _restoreSnapshotVirtualMachine(parameters: .decode(data)).encode()
+            case .listSnapshotsVirtualMachine:
+                return try await _listSnapshotsVirtualMachine(parameters: .decode(data)).encode()
             case .changePointerTypeVirtualMachine:
                 return try await _changePointerTypeVirtualMachine(parameters: .decode(data)).encode()
             }
@@ -866,6 +868,12 @@ extension UTMRemoteServer {
             let vm = try await findVM(withId: parameters.id)
             try await vm.wrapped!.restoreSnapshot(name: parameters.name)
             return .init()
+        }
+
+        private func _listSnapshotsVirtualMachine(parameters: M.ListSnapshotsVirtualMachine.Request) async throws -> M.ListSnapshotsVirtualMachine.Reply {
+            let vm = try await findVM(withId: parameters.id)
+            let names = try await UTMSnapshotService.listSnapshots(on: vm.wrapped!).map { $0.name }
+            return .init(names: names)
         }
 
         private func _changePointerTypeVirtualMachine(parameters: M.ChangePointerTypeVirtualMachine.Request) async throws -> M.ChangePointerTypeVirtualMachine.Reply {

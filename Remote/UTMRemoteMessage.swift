@@ -37,6 +37,7 @@ enum UTMRemoteMessageServer: UInt8, MessageID {
     case saveSnapshotVirtualMachine
     case deleteSnapshotVirtualMachine
     case restoreSnapshotVirtualMachine
+    case listSnapshotsVirtualMachine
     case changePointerTypeVirtualMachine
 }
 
@@ -279,6 +280,18 @@ extension UTMRemoteMessageServer {
         }
 
         struct Reply: Serializable, Codable {}
+    }
+
+    struct ListSnapshotsVirtualMachine: Message {
+        static let id = UTMRemoteMessageServer.listSnapshotsVirtualMachine
+
+        struct Request: Serializable, Codable {
+            let id: UUID
+        }
+
+        struct Reply: Serializable, Codable {
+            let names: [String]
+        }
     }
 
     struct ChangePointerTypeVirtualMachine: Message {
