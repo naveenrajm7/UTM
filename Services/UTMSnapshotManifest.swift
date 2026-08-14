@@ -26,12 +26,6 @@ struct UTMSnapshotEntry: Codable, Identifiable, Sendable, Equatable {
     let backend: UTMBackend
     /// Optional user description.
     var description: String?
-    /// Relative path (from the `Snapshots/` directory) to the saved state file.
-    ///
-    /// Only used by the Apple backend (e.g. `before-update/vmstate`). For QEMU the
-    /// state lives inside the qcow2 image so this is `nil`.
-    var stateFile: String?
-
     var id: String { name }
 }
 
@@ -133,12 +127,6 @@ struct UTMSnapshotManifest: Codable, Sendable {
         }
     }
 
-    /// Produce a filesystem-safe folder name for storing Apple snapshot state.
-    static func sanitizedFolderName(for name: String) -> String {
-        let illegalCharacters = CharacterSet(charactersIn: ",/:\\?%*|\"<>")
-        let sanitized = name.components(separatedBy: illegalCharacters).joined(separator: "-")
-        return sanitized.trimmingCharacters(in: .whitespaces)
-    }
 }
 
 // MARK: - Errors

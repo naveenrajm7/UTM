@@ -21,13 +21,12 @@ private let snapshotLogger = Logger(label: "com.utmapp.UTM.snapshot") { label in
     UTMLoggingSwift(label: label)
 }
 
-/// Coordinates named full-VM snapshots across backends.
+/// Coordinates named full-VM snapshots for the QEMU backend.
 ///
 /// The `Snapshots/manifest.plist` inside the `.utm` bundle is the source of truth for the list
-/// of snapshots. Backend-specific state (QEMU: inside the qcow2; Apple: a per-snapshot vmstate
-/// file) is written/read by the backend's `saveSnapshot(name:)`, `restoreSnapshot(name:)`, and
-/// `deleteSnapshot(name:)`. The manifest is only mutated after the backend operation succeeds so
-/// the manifest never claims a snapshot that was not actually written (or fails to delete one).
+/// of snapshots. Snapshot state is stored inside the qcow2 by QEMU's `savevm`, `loadvm`, and
+/// `delvm` operations. The manifest is only mutated after the backend operation succeeds so it
+/// never claims a snapshot that was not actually written (or fails to delete one).
 ///
 /// This is distinct from the internal suspend/resume feature which uses the reserved name
 /// `"suspend"` and `registryEntry.isSuspended`; user snapshots never touch that state.
@@ -35,6 +34,7 @@ private let snapshotLogger = Logger(label: "com.utmapp.UTM.snapshot") { label in
 enum UTMSnapshotService {
     /// Create a named snapshot capturing the full VM state (RAM + devices + disk).
     static func createSnapshot(name: String, description: String?, on vm: any UTMVirtualMachine) async throws {
+        try requireQemuBackend(vm)
         try UTMSnapshotManifest.validate(name: name)
         if let error = vm.snapshotUnsupportedError {
             throw error
@@ -43,34 +43,29 @@ enum UTMSnapshotService {
         guard manifest.find(name: name) == nil else {
             throw UTMSnapshotError.duplicateName(name)
         }
-        // capturing RAM requires the VM to be running or paused on both backends
+        // capturing RAM through the QEMU monitor requires the VM to be running or paused
         guard vm.state == .started || vm.state == .paused else {
             throw UTMSnapshotError.invalidVmState
         }
-        let backend = manifestBackend(of: vm)
-        let stateFile: String?
-        if backend == .apple {
-            stateFile = "\(UTMSnapshotManifest.sanitizedFolderName(for: name))/\(kSnapshotStateFileName)"
-        } else {
-            stateFile = nil
-        }
-        snapshotLogger.debug("Creating snapshot '\(name)' on \(backend.rawValue) VM")
+        snapshotLogger.debug("Creating snapshot '\(name)' on QEMU VM")
         try await vm.saveSnapshot(name: name)
-        let entry = UTMSnapshotEntry(name: name, created: Date(), backend: backend, description: description, stateFile: stateFile)
+        let entry = UTMSnapshotEntry(name: name, created: Date(), backend: .qemu, description: description)
         try manifest.add(entry)
         try manifest.save(toBundle: vm.pathUrl)
     }
 
     /// List all named snapshots recorded in the manifest, newest first.
     static func listSnapshots(on vm: any UTMVirtualMachine) throws -> [UTMSnapshotEntry] {
+        try requireQemuBackend(vm)
         let manifest = try UTMSnapshotManifest.load(fromBundle: vm.pathUrl)
         return manifest.all().sorted { $0.created > $1.created }
     }
 
     /// Restore the VM to a previously captured named snapshot.
     static func restoreSnapshot(name: String, on vm: any UTMVirtualMachine) async throws {
+        try requireQemuBackend(vm)
         let manifest = try UTMSnapshotManifest.load(fromBundle: vm.pathUrl)
-        guard let entry = manifest.find(name: name) else {
+        guard let entry = manifest.find(name: name), entry.backend == .qemu else {
             throw UTMSnapshotError.notFound(name)
         }
         snapshotLogger.debug("Restoring snapshot '\(entry.name)' on \(entry.backend.rawValue) VM")
@@ -79,13 +74,13 @@ enum UTMSnapshotService {
 
     /// Delete a named snapshot and its backend state.
     static func deleteSnapshot(name: String, on vm: any UTMVirtualMachine) async throws {
+        try requireQemuBackend(vm)
         var manifest = try UTMSnapshotManifest.load(fromBundle: vm.pathUrl)
-        guard let entry = manifest.find(name: name) else {
+        guard let entry = manifest.find(name: name), entry.backend == .qemu else {
             throw UTMSnapshotError.notFound(name)
         }
         // QEMU deletes the tag from the running qcow2 via the monitor, so it must be running.
-        // Apple simply removes the on-disk state file and can do so in any state.
-        if entry.backend == .qemu && vm.state != .started && vm.state != .paused {
+        if vm.state != .started && vm.state != .paused {
             throw UTMSnapshotError.invalidVmState
         }
         snapshotLogger.debug("Deleting snapshot '\(entry.name)' on \(entry.backend.rawValue) VM")
@@ -96,15 +91,9 @@ enum UTMSnapshotService {
 
     // MARK: - Helpers
 
-    private static func manifestBackend(of vm: any UTMVirtualMachine) -> UTMBackend {
-        #if os(macOS)
-        if #available(macOS 11, *), vm is UTMAppleVirtualMachine {
-            return .apple
+    private static func requireQemuBackend(_ vm: any UTMVirtualMachine) throws {
+        guard vm is UTMQemuVirtualMachine else {
+            throw UTMSnapshotError.notSupported
         }
-        #endif
-        return .qemu
     }
 }
-
-/// File name for a per-snapshot saved state (Apple backend).
-let kSnapshotStateFileName = "vmstate"

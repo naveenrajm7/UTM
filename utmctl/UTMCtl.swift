@@ -657,7 +657,7 @@ extension UTMCtl {
 extension UTMCtl {
     struct Snapshot: ParsableCommand {
         static var configuration = CommandConfiguration(
-            abstract: "Create, list, restore, and delete named full-VM snapshots.",
+            abstract: "Create, list, restore, and delete named full-VM snapshots for QEMU virtual machines.",
             subcommands: [SnapshotCreate.self, SnapshotList.self, SnapshotRestore.self, SnapshotDelete.self]
         )
     }
@@ -665,7 +665,7 @@ extension UTMCtl {
     struct SnapshotCreate: UTMAPICommand {
         static var configuration = CommandConfiguration(
             commandName: "create",
-            abstract: "Create a named snapshot of a running or paused virtual machine."
+            abstract: "Create a named snapshot of a running or paused QEMU virtual machine."
         )
 
         @OptionGroup var environment: EnvironmentOptions
@@ -687,7 +687,7 @@ extension UTMCtl {
     struct SnapshotList: UTMAPICommand {
         static var configuration = CommandConfiguration(
             commandName: "list",
-            abstract: "List the names of all snapshots for a virtual machine."
+            abstract: "List the names of all snapshots for a QEMU virtual machine."
         )
 
         @OptionGroup var environment: EnvironmentOptions
@@ -714,7 +714,7 @@ extension UTMCtl {
     struct SnapshotRestore: UTMAPICommand {
         static var configuration = CommandConfiguration(
             commandName: "restore",
-            abstract: "Restore a virtual machine to a named snapshot."
+            abstract: "Restore a QEMU virtual machine to a named snapshot."
         )
 
         @OptionGroup var environment: EnvironmentOptions
@@ -733,7 +733,7 @@ extension UTMCtl {
     struct SnapshotDelete: UTMAPICommand {
         static var configuration = CommandConfiguration(
             commandName: "delete",
-            abstract: "Delete a named snapshot from a virtual machine."
+            abstract: "Delete a named snapshot from a QEMU virtual machine."
         )
 
         @OptionGroup var environment: EnvironmentOptions

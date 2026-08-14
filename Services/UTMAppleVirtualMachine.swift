@@ -97,10 +97,6 @@ final class UTMAppleVirtualMachine: UTMVirtualMachine {
     
     private(set) var snapshotUnsupportedError: Error?
     
-    /// When set, the next `start` restores the VM from this saved state file (user snapshot) instead
-    /// of a fresh boot or the suspend state.
-    private var pendingRestoreSnapshotStateURL: URL?
-    
     private var isScopedAccess: Bool = false
     
     private weak var screenshotTimer: Timer?
@@ -192,9 +188,7 @@ final class UTMAppleVirtualMachine: UTMVirtualMachine {
             let isSuspended = await registryEntry.isSuspended
             try await beginAccessingResources()
             try await createAppleVM()
-            if let pendingRestoreURL = takePendingRestoreSnapshotStateURL() {
-                try await restoreState(from: pendingRestoreURL)
-            } else if isSuspended && !options.contains(.bootRecovery) {
+            if isSuspended && !options.contains(.bootRecovery) {
                 try await restoreSnapshot()
             } else {
                 try await _start(options: options)
@@ -382,27 +376,19 @@ final class UTMAppleVirtualMachine: UTMVirtualMachine {
     #endif
     
     func saveSnapshot(name: String? = nil) async throws {
+        guard name == nil else {
+            throw UTMSnapshotError.notSupported
+        }
         guard #available(macOS 14, *) else {
             return
         }
         #if arch(arm64)
+        guard let vmSavedStateURL = await config.system.boot.vmSavedStateURL else {
+            return
+        }
         if let snapshotUnsupportedError = snapshotUnsupportedError {
             throw snapshotUnsupportedError
         }
-        let stateURL: URL
-        let isUserSnapshot: Bool
-        if let name = name {
-            stateURL = userSnapshotStateURL(for: name)
-            isUserSnapshot = true
-            try FileManager.default.createDirectory(at: stateURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        } else {
-            guard let vmSavedStateURL = await config.system.boot.vmSavedStateURL else {
-                return
-            }
-            stateURL = vmSavedStateURL
-            isUserSnapshot = false
-        }
-        let wasStarted = state == .started
         if state == .started {
             try await pause()
         }
@@ -410,34 +396,17 @@ final class UTMAppleVirtualMachine: UTMVirtualMachine {
             return
         }
         state = .saving
-        do {
-            try await _saveSnapshot(url: stateURL)
-        } catch {
+        defer {
             state = .paused
-            throw error
         }
-        state = .paused
-        if isUserSnapshot {
-            // user snapshots leave the VM as it was (do not mark suspended)
-            if wasStarted {
-                try await resume()
-            }
-        } else {
-            await registryEntry.setIsSuspended(true)
-        }
+        try await _saveSnapshot(url: vmSavedStateURL)
+        await registryEntry.setIsSuspended(true)
         #endif
     }
     
     func deleteSnapshot(name: String? = nil) async throws {
-        if let name = name {
-            // user snapshot: remove the per-snapshot directory, leave suspend state untouched
-            let snapshotURL = UTMSnapshotManifest.directoryURL(forBundle: pathUrl)
-                .appendingPathComponent(UTMSnapshotManifest.sanitizedFolderName(for: name))
-            if FileManager.default.fileExists(atPath: snapshotURL.path) {
-                try FileManager.default.removeItem(at: snapshotURL)
-            }
-            try? updateLastModified()
-            return
+        guard name == nil else {
+            throw UTMSnapshotError.notSupported
         }
         guard let vmSavedStateURL = await config.system.boot.vmSavedStateURL else {
             return
@@ -469,14 +438,13 @@ final class UTMAppleVirtualMachine: UTMVirtualMachine {
     #endif
     
     func restoreSnapshot(name: String? = nil) async throws {
+        guard name == nil else {
+            throw UTMSnapshotError.notSupported
+        }
         guard #available(macOS 14, *) else {
             throw UTMAppleVirtualMachineError.operationNotAvailable
         }
         #if arch(arm64)
-        if let name = name {
-            try await restoreUserSnapshot(name: name)
-            return
-        }
         guard let vmSavedStateURL = await config.system.boot.vmSavedStateURL else {
             throw UTMAppleVirtualMachineError.operationNotAvailable
         }
@@ -500,56 +468,6 @@ final class UTMAppleVirtualMachine: UTMVirtualMachine {
         throw UTMAppleVirtualMachineError.operationNotAvailable
         #endif
     }
-    
-    /// URL to the saved state file for a named user snapshot inside the bundle's `Snapshots/` directory.
-    private func userSnapshotStateURL(for name: String) -> URL {
-        UTMSnapshotManifest.directoryURL(forBundle: pathUrl)
-            .appendingPathComponent(UTMSnapshotManifest.sanitizedFolderName(for: name))
-            .appendingPathComponent(kSnapshotStateFileName)
-    }
-    
-    private func takePendingRestoreSnapshotStateURL() -> URL? {
-        let url = pendingRestoreSnapshotStateURL
-        pendingRestoreSnapshotStateURL = nil
-        return url
-    }
-    
-    /// Restore VM state from a saved state file during startup. Assumes the VZ machine was created.
-    private func restoreState(from url: URL) async throws {
-        #if arch(arm64)
-        guard #available(macOS 14, *) else {
-            throw UTMAppleVirtualMachineError.operationNotAvailable
-        }
-        try await _restoreSnapshot(url: url)
-        try await _resume()
-        #else
-        throw UTMAppleVirtualMachineError.operationNotAvailable
-        #endif
-    }
-    
-    #if arch(arm64)
-    @available(macOS 14, *)
-    private func restoreUserSnapshot(name: String) async throws {
-        let stateURL = userSnapshotStateURL(for: name)
-        guard FileManager.default.fileExists(atPath: stateURL.path) else {
-            throw UTMSnapshotError.notFound(name)
-        }
-        if state == .started || state == .paused {
-            try await stop(usingMethod: .force)
-        }
-        guard state == .stopped else {
-            throw UTMAppleVirtualMachineError.operationNotAvailable
-        }
-        // reuse the startup path: create the VZ machine then load the snapshot instead of booting
-        pendingRestoreSnapshotStateURL = stateURL
-        do {
-            try await start()
-        } catch {
-            pendingRestoreSnapshotStateURL = nil
-            throw error
-        }
-    }
-    #endif
     
     private func _resume() async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
